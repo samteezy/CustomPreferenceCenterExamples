@@ -1,0 +1,114 @@
+%%[
+
+/* AMPscript needs to be placed first to extract the parameters from the email. Ideally, parameter would be encrypted in source, and decrypted using DecryptSymmetric to prevent data retrieval via URL hacking.*/
+
+
+var @id, @email, @firstname, @lastname, @Pref1, @CRMobject, @subscriberstatus, @pageState, @subscriber, @existingemail, @msg
+
+/*Gets parameter values from the URL*/
+Set @id = QueryParameter('id')
+Set @msg = QueryParameter('msg')
+
+/* Get the subscriber's current status */
+If not empty(@id) then 
+]%%
+ <script runat="server"> /* SSJS that makes callout to get the current subscriber status and email address*/
+ Platform.Load("core","1");
+ var sk = Variable.GetValue("@id");
+ var prox = new Script.Util.WSProxy();
+ var cols = ["Id","Status","EmailAddress"];
+ var filter = {
+    Property:"SubscriberKey",
+    SimpleOperator:"equals"
+    };
+ filter.Value = (sk);
+ var response = prox.retrieve("Subscriber", cols, filter);
+ //Write(Stringify(response));
+ Variable.SetValue("@subscriberstatus",response.Results[0].Status);
+ Variable.SetValue("@existingemail",response.Results[0].EmailAddress);
+ </script>
+
+%%[
+
+ if Substring(@id,1,3) == '003' AND @subscriberstatus == 'active' then /* If contact, query contact data to pre-populate pref center fields*/
+  Set @CRMobject = 'Contact'
+  Set @subscriber = Row(RetrieveSalesforceObjects('Contact','Email,FirstName,LastName,Pref1__c','ID','=',@id),1)
+  Set @email = Field(@subscriber,'Email')
+  Set @firstname = Field(@subscriber,'FirstName')
+  Set @lastname = Field(@subscriber,'LastName')
+  Set @Pref1 = Field(@subscriber,'Pref1__c')
+  Set @pageState = 'update'
+
+
+ elseif Substring(@id,1,3) == '00Q' AND @subscriberstatus == 'active' then /* Pull down lead data to populate pref center */
+  Set @CRMobject = 'Lead'
+  Set @subscriber = Row(RetrieveSalesforceObjects('Lead','Email,FirstName,LastName,Pref1__c','ID','=',@id),1)
+  Set @email = Field(@subscriber,'Email')
+  Set @firstname = Field(@subscriber,'FirstName')
+  Set @lastname = Field(@subscriber,'LastName')
+  Set @Pref1 = Field(@subscriber,'Pref1__c')
+  Set @pageState = 'update'
+
+ elseif @subscriberstatus != 'active' then
+  Set @pageState = 'globalsubscribe'
+  Set @email = @existingemail
+
+ else /* if ID isn't set, then we need to set the vars to null */
+  Set @email = ''
+  Set @firstname = ''
+  Set @lastname = ''
+  Set @pageState = 'new'
+ endif
+
+endif
+
+
+If @subscriberstatus == 'Active' then]%%
+
+ <form action="https://pub.s10.exacttarget.com/0ur1ugnnnz3" method="post">
+  <input type="hidden" name="id" value="%%=v(@id)=%%">
+  <input type="hidden" name="pageState" value="%%=v(@pageState)=%%">
+  <input type="hidden" name="CRMobject" value="%%=v(@CRMobject)=%%">
+  <input type="hidden" name="existingemail" value="%%=v(@existingemail)=%%">
+
+  Email Address: <input type="text" name="emailaddress" value="%%=v(@email)=%%">
+  %%[ If @msg == "invalidemail" then ]%%
+   <p>Your email address is invalid. Please correct it, and click Update.</p>
+  %%[Else EndIf]%%
+  <br>
+  First Name: <input type="text" name="firstname" value="%%=v(@firstname)=%%">
+  <br>
+  Last Name: <input type="text" name="lastname" value="%%=v(@lastname)=%%">
+  <br>
+  <br>
+  Pref1: 
+  %%[ If @Pref1 == True then ]%%
+   <input type="checkbox" name="pref1" checked="">
+  %%[Else]%%
+   <input type="checkbox" name="pref1">
+  %%[EndIf]%%
+  <br>
+  <br>
+  Please unsubscribe me from all marketing emails: <input type="checkbox" name="globalunsubscribe">
+  <input type="submit" value="Update Preferences">
+ </form>
+
+%%[ ELSE ]%%
+ <h2>You are currently %%=v(@subscriberstatus)=%%!</h2>
+ <form action="https://pub.s10.exacttarget.com/0ur1ugnnnz3" method="post">
+ <input type="hidden" name="id" value="%%=v(@id)=%%">
+ <input type="hidden" name="pageState" value="%%=v(@pageState)=%%">
+ <input type="hidden" name="CRMobject" value="%%=v(@CRMobject)=%%">
+ <input type="hidden" name="existingemail" value="%%=v(@existingemail)=%%">
+ <div class="formgroup2">
+ <p>
+ Want to begin receiving emails again? Click below and your old email preferences will be restored. 
+ </p>
+ Email Address: <input type="text" name="emailaddress" value="%%=v(@email)=%%">
+ %%[ If @msg == "invalidemail" then ]%%
+   <p>Your email address is invalid. Please correct it, and click Update.</p>
+  %%[Else EndIf]%%
+ <input type="submit" value="Please include me in future emails">
+ </div>
+ </form>
+%%[ENDIF ]%%

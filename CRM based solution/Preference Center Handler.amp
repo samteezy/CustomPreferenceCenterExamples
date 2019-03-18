@@ -1,0 +1,109 @@
+%%[
+/* Handler page shamefully stolen from http://www.zackworden.com/portfolio/71/ */
+var @pageState, @record, @id, @Pref1, @CRMobject, @FirstName, @LastName, @EmailAddress
+
+
+/* Is this an update, a global unsubscribe, or global subscribe - and do we have the data we need? */
+if empty(RequestParameter("id")) then /*we are missing data */
+ Set @pageState = 0
+elseif RequestParameter("pageState") == "update" AND NOT empty(RequestParameter("CRMobject")) AND RequestParameter("globalunsubscribe") != "on" then /* the user is updating preferences */
+ Set @pageState = 1
+ Set @id = RequestParameter("id")
+ Set @CRMobject = RequestParameter("CRMobject")
+elseif RequestParameter("globalunsubscribe") == "on" then /*the user is attempting to unsubscribe */
+ Set @pageState = 2
+ Set @id = RequestParameter("id")
+elseif RequestParameter("pageState") == "globalsubscribe" then /* the user is attempting to resubscribe */
+ Set @pageState = 3
+ Set @id = RequestParameter("id")
+else
+ Set @pageState = 0
+endif
+
+/* Set base url for redirect options later */
+Set @RedirectBaseURL = Concat('https://pub.s10.exacttarget.com/plnhytzj4ha','?id=',@id)
+
+/*Perform field validation, and redirect to page for error handling  */
+if IsEmailAddress(RequestParameter("EmailAddress")) == false then
+ Set @TargetURL = Concat(@RedirectBaseURL,'&msg=invalidemail')
+ Redirect(@TargetURL)
+else
+ Set @EmailAddress = RequestParameter("EmailAddress")
+endif
+
+
+/* Do yo' thing! */
+if @pageState == 1 then /* Update Salesforce Record */
+
+ /*Set field values that are common to both objects*/
+ If NOT empty(RequestParameter("Pref1")) then /*need to translate the value of the checkbox from form into strings for SF update */
+  Set @Pref1 = 'true'
+ else
+  Set @Pref1 = 'false'
+ endif
+ Set @FirstName = RequestParameter("FirstName")
+ Set @LastName = RequestParameter("LastName")
+ 
+ If @EmailAddress != RequestParameter("existingemail") then /*If subscriber changes email address, update it in MC directly as well */
+  ]%%
+   <script runat="server"> 
+   Platform.Load("core","1");
+   var sk = Variable.GetValue("@id");
+   var emailaddress = Variable.GetValue("@EmailAddress");
+   var subscriber = {"EmailAddress":emailaddress};
+   var subObj = Subscriber.Init(sk);
+   var status = subObj.Update(subscriber); 
+   </script>
+%%[
+  %%[
+ else
+ endif
+ 
+ If @CRMobject == "Contact" then /* Set contact-specific fields and update */
+ 
+ Set @record = UpdateSingleSalesforceObject('Contact',@id,'Pref1__c',@Pref1,'FirstName',@FirstName,'LastName',@LastName,'Email',@EmailAddress)
+ 
+ 
+ elseif @CRMobject == "Lead" then /* Set lead-specific fields and update*/
+ 
+ Set @record = UpdateSingleSalesforceObject('Lead',@id,'Pref1__c',@Pref1,'FirstName',@FirstName,'LastName',@LastName,'Email',@EmailAddress)
+
+ else /*Do nothing */
+ endif
+ 
+]%%
+ /*This is some debug stuff which will never render if the redirect is active */
+ <h2>Debug</h2>
+ <p>CRMobject: %%=v(@CRMobject)=%% | id: %%=v(@id)=%% | Pref1__c: %%=v(@Pref1)=%% | %%=v(RequestParameter("globalunsubscribe"))=%%</p>
+%%[
+ 
+
+ 
+ELSEIF @pageState == 2 THEN   /*  Globally Unsubscribe Subscriber  */
+]%% 
+ <script runat="server"> 
+ Platform.Load("core","1");
+ var sk = Variable.GetValue("@id");
+ var subscriber = {"Status":"Unsubscribed"};
+ var subObj = Subscriber.Init(sk);
+ var status = subObj.Update(subscriber); 
+ </script>
+%%[
+
+
+ELSEIF @pageState == 3 THEN   /*  Globally Subscribe Subscriber  */
+]%% 
+ <script runat="server"> 
+ Platform.Load("core","1");
+ var sk = Variable.GetValue("@id");
+ var subscriber = {"Status":"Active"};
+ var subObj = Subscriber.Init(sk);
+ var status = subObj.Update(subscriber); 
+ </script>
+%%[
+endif
+
+/* Redirect back to subscriber page when done. Comment out to debug. */
+Redirect(Concat('https://pub.s10.exacttarget.com/plnhytzj4ha','?id=',@id))
+
+]%%
