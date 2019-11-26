@@ -1,0 +1,145 @@
+%%[
+
+var @pageState, @record, @id, @CRMobject, @FirstName, @LastName, @EmailAddress, @TargetURL, @RedirectBaseURL, @campaigns, @campaignid, @campaignname, @campaignmember, @campaignparam, @CreateCM, @UpdateCM, @idtype, @PrefPageURL, @CampaignType
+
+/******* CHANGE THESE SETTINGS FIRST ***********
+When first using this code, the following need to be set: */
+
+Set @PrefPageURL = "https://cloud.mail-powerscore.com/newprefcentertest"  /*Put the URL of the page you're redirecting to*/
+Set @CampaignType = "Blog Subscriptions"                                   /*Put the type of campaign that corresponds to preferences */
+
+/******* End of Common Config Settings *******/
+
+
+/* Is this an update, a global unsubscribe, or global subscribe - and do we have the data we need? */
+if empty(RequestParameter("id")) then
+ Set @pageState = 0
+elseif RequestParameter("pageState") == "update" AND NOT empty(RequestParameter("CRMobject")) AND RequestParameter("globalunsubscribe") != "on" then
+ Set @pageState = 1
+ Set @id = RequestParameter("id")
+ Set @CRMobject = RequestParameter("CRMobject")
+elseif RequestParameter("globalunsubscribe") == "on" then
+ Set @pageState = 2
+ Set @id = RequestParameter("id")
+elseif RequestParameter("pageState") == "globalsubscribe" then
+ Set @pageState = 3
+ Set @id = RequestParameter("id")
+else
+ Set @pageState = 0
+endif
+
+/* Set URL for form page here*/
+Set @RedirectBaseURL = Concat(@PrefPageURL,"?id=",@id)
+
+
+/*Perform field validation, and redirect to page for error handling  */
+if IsEmailAddress(RequestParameter("EmailAddress")) == false then
+ Set @TargetURL = Concat(@RedirectBaseURL,"&msg=invalidemail")
+ Redirect(@TargetURL)
+else
+ Set @EmailAddress = RequestParameter("EmailAddress")
+endif
+
+
+/* Do yo" thing! */
+if @pageState == 1 then /* Update Salesforce Record */
+ 
+  /*If email address has changed, update the subscriber in MC directly too */
+  If @EmailAddress != RequestParameter("existingemail") then
+   ]%%
+
+    <script runat="server"> 
+    Platform.Load("core","1");
+    var sk = Variable.GetValue("@id");
+    var emailaddress = Variable.GetValue("@EmailAddress");
+    var subscriber = {"EmailAddress":emailaddress};
+    var subObj = Subscriber.Init(sk);
+    var status = subObj.Update(subscriber); 
+    </script>
+   
+   %%[
+  else
+  endif
+
+  /*Start taking action in CRM)*/
+  
+  If @CRMobject == "Contact" then /* Set contact-specific fields and update*/
+   Set @record = UpdateSingleSalesforceObject("Contact",@id,"FirstName",@FirstName,"LastName",@LastName,"Email",@EmailAddress)
+
+   Set @idtype = "ContactId"
+  
+  elseif @CRMobject == "Lead" then /* Set lead-specific fields and update*/
+   Set @record = UpdateSingleSalesforceObject("Lead",@id,"FirstName",@FirstName,"LastName",@LastName,"Email",@EmailAddress)
+   Set @idtype = "LeadId"
+
+  else /*Do nothing */
+  endif
+
+  Set @Campaigns = LookupRows("Campaign_Salesforce","Type",@CampaignType)
+
+  If RowCount(@Campaigns) > 0 then
+    For @i = 1 to RowCount(@Campaigns) do
+
+    /*Set the id for the campaign */
+    Set @campaignid = Field(Row(@Campaigns,@i), "Id")
+    Set @campaignname = Field(Row(@Campaigns,@i),"Name")
+
+    Set @campaignparam = RequestParameter(Concat("Preference_",@campaignid))
+
+    Set @CampaignMember = RetrieveSalesforceObjects("CampaignMember",
+                                                    "Id,Status",
+                                                    Concat(@CRMobject,"Id"),"=",@id,
+                                                    "CampaignId","=",@campaignid)
+
+    If not empty(@campaignparam) and RowCount(@CampaignMember) > 0 then
+
+      Set @UpdateCM = UpdateSingleSalesforceObject(
+          "CampaignMember",Field(Row(@CampaignMember,1),"Id"),
+          "Status","Submitted Form"
+          )
+
+    elseif not empty(@campaignparam) and RowCount(@CampaignMember) == 0 then
+
+      Set @CreateCM = CreateSalesforceObject(
+          "CampaignMember",3,
+          @idtype,@id,
+          "CampaignId",@campaignid,
+          "Status","Submitted Form"
+          ) 
+
+    elseif empty(@campaignparam) and RowCount(@CampaignMember) > 0 then
+
+      Set @UpdateCM = UpdateSingleSalesforceObject(
+          "CampaignMember",Field(Row(@CampaignMember,1),"Id"),
+          "Status","Opted Out"
+          )
+
+    else endif
+
+  next @i
+
+endif
+
+ELSEIF @pageState == 2 THEN   /*  Globally Unsubscribe Subscriber  */ ]%%
+
+ <script runat="server"> 
+ Platform.Load("core","1");
+ var sk = Variable.GetValue("@id");
+ var subscriber = {"Status":"Unsubscribed"};
+ var subObj = Subscriber.Init(sk);
+ var status = subObj.Update(subscriber); 
+ </script>
+
+ %%[ ELSEIF @pageState == 3 THEN   /*  Globally Subscribe Subscriber  */ ]%%
+  <script runat="server"> 
+  Platform.Load("core","1");
+  var sk = Variable.GetValue("@id");
+  var subscriber = {"Status":"Active"};
+  var subObj = Subscriber.Init(sk);
+  var status = subObj.Update(subscriber); 
+  </script>
+ %%[
+endif
+/* Redirect back to subscriber page when done. Remove to debug. */
+Redirect(Concat(@RedirectBaseURL,"&msg=success"))
+]%%
